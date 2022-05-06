@@ -7,7 +7,6 @@ import sys
 import time
 from prettytable import PrettyTable
 from netaddr import IPAddress
-import scapy.all as scapy
 from scapy.all import ARP, Ether, srp
 import threading
 
@@ -156,9 +155,13 @@ def target():
 # Enable Redirect
 def redirect():
     cmd = 'echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward'
-    print(color.BLUE+"\n[~] Enabling forwarding...\n"+color.END)
-    res = subprocess.check_output(cmd, shell=True).decode()
-    print(res)
+    print(color.BLUE+"\n[~] Enabling forwarding..."+color.END)
+    try:
+        subprocess.check_output(cmd, shell=True).decode()
+    except subprocess.CalledProcessError:
+        print(color.RED+"[-] Couldn't enable forwarding"+color.END)
+        reset_mac()
+        sys.exit(color.RED+"Exiting..."+color.END)
 
 # ARPSpoof
 def arpspoof(ip1,ip2,pos):
@@ -244,13 +247,13 @@ try:
     redirect()
     attck_thread()
     
-    print(color.GREEN+"[+] Job Done...\n"+color.END)
+    print(color.GREEN+"\n[+] Job Done...\n"+color.END)
     reset_mac()
 except KeyboardInterrupt as k:
     if J:
-        print(color.GREEN+"[+] Job Done...\n"+color.END)
+        print(color.GREEN+"\n[+] Job Done...\n"+color.END)
     else:
-        print(color.RED+"[-] Keyboard Interrupt"+color.END)
+        print(color.RED+"\n[-] Keyboard Interrupt"+color.END)
     reset_mac()
     sys.exit(color.RED+"Exiting..."+color.END)
 
