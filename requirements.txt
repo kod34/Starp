@@ -1,0 +1,4 @@
+netaddr
+netifaces
+prettytable
+scapy
