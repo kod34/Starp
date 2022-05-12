@@ -11,6 +11,7 @@ from scapy.all import ARP, Ether, srp
 import threading
 
 J = False
+choice_scan = None
 
 class color:
     PURPLE = '\033[95m'
@@ -242,7 +243,13 @@ try:
     get_ssid()
     change_mac()
     time.sleep(5)
-    scan_network()
+    while choice_scan != "Y" and choice_scan != "N" and choice_scan != "n" and choice_scan != "y":
+        choice_scan = input("Start Scan? (Y/N): ")
+    if choice_scan == "Y" or choice_scan == "y":
+        scan_network()
+    else:
+        reset_mac()
+        sys.exit(color.RED+"Exiting..."+color.END)
     target()
     redirect()
     attck_thread()
